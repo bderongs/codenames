@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Codenames Online</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            height: 100vh;
+        }
+
+        #game-area {
+            flex: 2;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .board {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 10px;
+            margin-top: 20px;
+        }
+
+        .card {
+            aspect-ratio: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            cursor: pointer;
+            background-color: #f0f0f0;
+            border: 1px solid #ccc;
+            text-align: center;
+        }
+
+        .card.revealed {
+            cursor: default;
+        }
+
+        .card.red {
+            background-color: #ffcccc;
+        }
+
+        .card.blue {
+            background-color: #ccccff;
+        }
+
+        .card.neutral {
+            background-color: #f0f0f0;
+        }
+
+        .card.assassin {
+            background-color: #333;
+            color: white;
+        }
+
+        #clue-area {
+            margin-top: 20px;
+        }
+
+        #player-list {
+            margin-top: 20px;
+            font-size: 14px;
+        }
+
+        .team-players {
+            margin-bottom: 20px;
+            padding: 10px;
+            border-radius: 5px;
+        }
+
+        .red-team {
+            background-color: #ffeeee;
+        }
+
+        .blue-team {
+            background-color: #eeeeff;
+        }
+
+        .player-info {
+            margin: 5px 0;
+            padding: 5px;
+            border-radius: 3px;
+        }
+
+        .player-info.spymaster {
+            font-weight: bold;
+        }
+
+        #start-game {
+            display: none;
+            margin-top: 10px;
+            padding: 10px 20px;
+            font-size: 16px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+
+        #start-game:hover {
+            background-color: #45a049;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="login-area">
+        <h2>Join or Create Game</h2>
+        <input id="game-id" type="text" placeholder="Game ID">
+        <input id="player-name" type="text" placeholder="Your Name">
+        <select id="team-select">
+            <option value="red">Red Team</option>
+            <option value="blue">Blue Team</option>
+        </select>
+        <select id="role-select">
+            <option value="operative">Operative</option>
+            <option value="spymaster">Spymaster</option>
+        </select>
+        <button id="join-game">Join Game</button>
+        <button id="create-game">Create New Game</button>
+    </div>
+
+    <div id="game-area">
+        <h1>Codenames</h1>
+        <div id="turn-indicator"></div>
+        <div id="clue-display"></div>
+        <div id="board" class="board"></div>
+        <div id="clue-area">
+            <input type="text" id="clue-word" placeholder="Clue word">
+            <input type="number" id="clue-number" min="0" max="9" placeholder="Number">
+            <button id="submit-clue">Submit Clue</button>
+        </div>
+        <div id="player-list">
+            <h3>Players</h3>
+            <div class="team-players" id="red-team-players"></div>
+            <div class="team-players" id="blue-team-players"></div>
+        </div>
+        <button id="start-game">Start Game</button>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const socket = io();
+        let gameId, team, role;
+
+        socket.on('connect', () => {
+            console.log('Connected to server with ID:', socket.id);
+        });
+
+        // Login area functionality
+        document.getElementById('join-game').addEventListener('click', joinGame);
+        document.getElementById('create-game').addEventListener('click', createGame);
+
+        function joinGame() {
+            gameId = document.getElementById('game-id').value;
+            team = document.getElementById('team-select').value;
+            role = document.getElementById('role-select').value;
+            const playerName = document.getElementById('player-name').value || 'Anonymous';
+            console.log('Joining game:', gameId, team, role, playerName);
+            socket.emit('joinGame', { gameId, team, role, playerName });
+        }
+
+        function createGame() {
+            console.log('Creating new game');
+            socket.emit('createGame');
+        }
+
+        // Socket event handlers
+        socket.on('gameCreated', (data) => {
+            console.log('Game created:', data);
+            gameId = data.gameId;
+            document.getElementById('game-id').value = gameId;
+            alert(`New game created! Game ID: ${gameId}`);
+        });
+
+        socket.on('gameJoined', (data) => {
+            console.log('Game joined data:', data);
+            gameId = data.gameId;
+            document.getElementById('login-area').style.display = 'none';
+            document.getElementById('game-area').style.display = 'block';
+            if (role === 'spymaster') {
+                document.body.classList.add('spymaster');
+            }
+            updateGameState(data);
+            updatePlayerList(data.players);
+        });
+
+        socket.on('gameStateUpdate', (gameState) => {
+            console.log('Game state update received:', gameState);
+            updateGameState(gameState);
+        });
+
+        socket.on('updatePlayerList', (players) => {
+            updatePlayerList(players);
+        });
+
+        socket.on('gameStarted', (gameState) => {
+            console.log('Game started', gameState);
+            updateGameState(gameState);
+            document.getElementById('start-game').style.display = 'none';
+        });
+
+        socket.on('error', (errorMessage) => {
+            console.error('Error:', errorMessage);
+            alert(errorMessage);
+        });
+
+        function updatePlayerList(players) {
+            const playerList = document.getElementById('player-list');
+            playerList.innerHTML = '<h3>Players</h3>';
+
+            const redTeamDiv = document.createElement('div');
+            redTeamDiv.className = 'team-players red-team';
+            redTeamDiv.innerHTML = '<h4>Red Team</h4>';
+
+            const blueTeamDiv = document.createElement('div');
+            blueTeamDiv.className = 'team-players blue-team';
+            blueTeamDiv.innerHTML = '<h4>Blue Team</h4>';
+
+            updateTeamPlayers(redTeamDiv, players.red, 'red');
+            updateTeamPlayers(blueTeamDiv, players.blue, 'blue');
+
+            playerList.appendChild(redTeamDiv);
+            playerList.appendChild(blueTeamDiv);
+
+            const startGameButton = document.getElementById('start-game');
+            startGameButton.style.display =
+                (players.red.spymaster && players.blue.spymaster &&
+                    players.red.operatives.length > 0 && players.blue.operatives.length > 0) ? 'block' : 'none';
+        }
+
+        function updateTeamPlayers(element, teamPlayers, teamColor) {
+            if (teamPlayers.spymaster) {
+                const spymasterInfo = document.createElement('div');
+                spymasterInfo.className = `player-info spymaster`;
+                spymasterInfo.textContent = `Spymaster: ${teamPlayers.spymaster.name} ${teamPlayers.spymaster.id === socket.id ? '(You)' : ''}`;
+                element.appendChild(spymasterInfo);
+            }
+
+            teamPlayers.operatives.forEach((operative, index) => {
+                const operativeInfo = document.createElement('div');
+                operativeInfo.className = 'player-info';
+                operativeInfo.textContent = `Operative: ${operative.name} ${operative.id === socket.id ? '(You)' : ''}`;
+                element.appendChild(operativeInfo);
+            });
+        }
+
+        function updateGameState(gameState) {
+            console.log('Updating game state:', gameState);
+            const board = document.getElementById('board');
+            board.innerHTML = '';
+            gameState.board.forEach((card, index) => {
+                const cardElement = document.createElement('div');
+                let cardClass = 'card';
+
+                if (card.color) {
+                    cardClass += ` ${card.color}`;
+                }
+
+                if (card.revealed) {
+                    cardClass += ' revealed';
+                }
+
+                cardElement.className = cardClass;
+                cardElement.textContent = card.word;
+                cardElement.addEventListener('click', () => revealCard(index));
+                board.appendChild(cardElement);
+            });
+
+            document.getElementById('turn-indicator').textContent = `Current turn: ${gameState.currentTurn.toUpperCase()} team`;
+
+            const clueDisplay = document.getElementById('clue-display');
+            console.log('Clue in game state:', gameState.clue);
+            if (gameState.clue) {
+                clueDisplay.textContent = `Clue: ${gameState.clue.word} (${gameState.clue.number})`;
+            } else {
+                clueDisplay.textContent = 'Waiting for spymaster to give a clue...';
+            }
+            console.log('Clue display updated:', clueDisplay.textContent);
+
+            const clueArea = document.getElementById('clue-area');
+            clueArea.style.display = (role === 'spymaster' && team === gameState.currentTurn) ? 'block' : 'none';
+
+            if (gameState.winner) {
+                alert(`${gameState.winner.toUpperCase()} team wins!`);
+            }
+        }
+
+        function revealCard(cardIndex) {
+            if (role === 'operative') {
+                socket.emit('revealCard', { gameId, cardIndex });
+            }
+        }
+
+        document.getElementById('submit-clue').addEventListener('click', () => {
+            const clueWord = document.getElementById('clue-word').value;
+            const clueNumber = document.getElementById('clue-number').value;
+            if (clueWord && clueNumber) {
+                console.log('Submitting clue:', clueWord, clueNumber);
+                socket.emit('submitClue', { gameId, clue: clueWord, number: clueNumber });
+            } else {
+                alert('Please enter both a clue word and a number');
+            }
+        });
+
+        document.getElementById('start-game').addEventListener('click', () => {
+            console.log('Start game button clicked. Game ID:', gameId);
+            if (gameId) {
+                socket.emit('startGame', { gameId });
+            } else {
+                console.error('Game ID is undefined');
+                alert('Error: Game ID is undefined. Please try rejoining the game.');
+            }
+        });
+
+        socket.on('disconnect', () => {
+            console.log('Disconnected from server');
+        });
+
+        // Remove or modify other client-side game logic as needed
+    </script>
+</body>
+
+</html>
