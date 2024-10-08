@@ -150,7 +150,7 @@
 
     <script src="/socket.io/socket.io.js"></script>
     <script>
-        const socket = io();
+        const socket = io('https://codenames-682c.onrender.com/');
         let gameId, team, role;
 
         socket.on('connect', () => {
